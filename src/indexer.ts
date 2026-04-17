@@ -9,6 +9,7 @@ import { handlePostFinalized } from "./handlers/postFinalized";
 
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS as `0x${string}`;
 const START_BLOCK = BigInt(process.env.START_BLOCK || "0");
+const CHUNK_SIZE = BigInt(process.env.BACKFILL_CHUNK_SIZE || "1000");
 
 if (!CONTRACT_ADDRESS) {
   throw new Error("Missing CONTRACT_ADDRESS");
@@ -46,27 +47,45 @@ async function processLog(log: any) {
   }
 }
 
+function getHighestBlock(logs: any[]): bigint {
+  let highestBlock = 0n;
+
+  for (const log of logs) {
+    if (log.blockNumber > highestBlock) {
+      highestBlock = log.blockNumber;
+    }
+  }
+
+  return highestBlock;
+}
+
 async function runBackfill(fromBlock: bigint, toBlock: bigint) {
   if (toBlock < fromBlock) return;
 
-  const logs = await publicClient.getContractEvents({
-    address: CONTRACT_ADDRESS,
-    abi: thesisArenaAbi,
-    fromBlock,
-    toBlock
-  });
+  let currentFrom = fromBlock;
 
-  for (const log of logs) {
-    await processLog(log);
-  }
-}
+  while (currentFrom <= toBlock) {
+    const currentTo =
+      currentFrom + CHUNK_SIZE - 1n > toBlock
+        ? toBlock
+        : currentFrom + CHUNK_SIZE - 1n;
 
-function getHighestBlock(logs: any[]): bigint {
-  let highestBlock = 0n;
-  for (const log of logs) {
-    if (log.blockNumber > highestBlock) highestBlock = log.blockNumber;
+    console.log(`Backfill chunk: ${currentFrom} -> ${currentTo}`);
+
+    const logs = await publicClient.getContractEvents({
+      address: CONTRACT_ADDRESS,
+      abi: thesisArenaAbi,
+      fromBlock: currentFrom,
+      toBlock: currentTo
+    });
+
+    for (const log of logs) {
+      await processLog(log);
+    }
+
+    await updateIndexerState(currentTo);
+    currentFrom = currentTo + 1n;
   }
-  return highestBlock;
 }
 
 export async function startIndexer() {
@@ -118,6 +137,7 @@ export async function startIndexer() {
   });
 
   const newCurrentBlock = await publicClient.getBlockNumber();
+
   if (newCurrentBlock > lastSyncedBlock) {
     console.log(
       `Overlap backfill from ${lastSyncedBlock + 1n} to ${newCurrentBlock}`
