@@ -1,6 +1,8 @@
 import express from "express";
+import cors from "cors";
 import dotenv from "dotenv";
 import { startIndexer } from "./indexer";
+import { authRouter } from "./auth/router";
 
 dotenv.config();
 
@@ -11,11 +13,20 @@ let indexerStarted = false;
 let indexerStatus: "idle" | "starting" | "running" | "error" = "idle";
 let lastIndexerError: string | null = null;
 
+app.use(
+  cors({
+    origin: true,
+    methods: ["GET", "POST"],
+  })
+);
+
+app.use(express.json());
+
 app.get("/", (_req, res) => {
   res.status(200).json({
     ok: true,
     service: "thesis-arena-indexer",
-    indexerStatus
+    indexerStatus,
   });
 });
 
@@ -24,9 +35,11 @@ app.get("/health", (_req, res) => {
     ok: indexerStatus !== "error",
     service: "thesis-arena-indexer",
     indexerStatus,
-    lastIndexerError
+    lastIndexerError,
   });
 });
+
+app.use("/auth", authRouter);
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`HTTP server listening on port ${PORT}`);
